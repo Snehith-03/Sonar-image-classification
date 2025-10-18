@@ -1,0 +1,99 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Schnorr Demo</title>
+</head>
+<body>
+<h1>Schnorr Login</h1>
+<input id="username" placeholder="Username"/><br><br>
+<button id="registerBtn">Register</button>
+<button id="loginBtn">Login</button>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/elliptic/6.5.4/elliptic.min.js"></script>
+
+<script>
+setTimeout(() => {
+  if (typeof elliptic === 'undefined') {
+    alert('Error: Library not loaded');
+    return;
+  }
+
+  const EC = elliptic.ec;
+  const ec = new EC('secp256k1');
+  const BN = ec.curve.n.constructor;
+
+  let privKeyHex = localStorage.getItem('privKey');
+  let key;
+  if(privKeyHex){
+    key = ec.keyFromPrivate(privKeyHex, 'hex');
+  } else {
+    key = ec.genKeyPair();
+    localStorage.setItem('privKey', key.getPrivate('hex'));
+  }
+
+  const usernameInput = document.getElementById('username');
+
+  document.getElementById('registerBtn').onclick = async () => {
+    const username = usernameInput.value.trim();
+    if(!username) { alert("Enter username"); return; }
+
+    try {
+      const res = await fetch('http://localhost:3000/register', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ username, pubKey: key.getPublic('hex') })
+      });
+      const data = await res.json();
+      alert(JSON.stringify(data));
+    } catch(e) {
+      alert('Error: ' + e.message);
+    }
+  };
+
+  document.getElementById('loginBtn').onclick = async () => {
+    const username = usernameInput.value.trim();
+    if(!username) { alert("Enter username"); return; }
+
+    try {
+      const r = ec.genKeyPair();
+      const R = r.getPublic('hex');
+
+      const chalRes = await fetch('http://localhost:3000/login/challenge', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ username, R })
+      });
+      
+      if (!chalRes.ok) {
+        alert('Challenge failed');
+        return;
+      }
+      
+      const { c } = await chalRes.json();
+
+      const privBN = key.getPrivate();
+      const rBN = r.getPrivate();
+      const cBN = new BN(c, 16);
+      const s = rBN.add(privBN.mul(cBN)).umod(ec.curve.n).toString('hex');
+
+      const verifyRes = await fetch('http://localhost:3000/login/verify', {
+        method:'POST',
+        headers:{'Content-Type':'application/json'},
+        body: JSON.stringify({ username, s })
+      });
+      
+      if (!verifyRes.ok) {
+        alert('Verification failed');
+        return;
+      }
+      
+      const verifyData = await verifyRes.json();
+      alert(JSON.stringify(verifyData));
+    } catch(e) {
+      alert('Error: ' + e.message);
+    }
+  };
+}, 1000);
+</script>
+</body>
+</html>
