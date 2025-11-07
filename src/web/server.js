@@ -12,16 +12,15 @@ const { FormData, Blob } = globalThis;const jwt = require('jsonwebtoken');
 require('dotenv').config();
 
 
-
 const JWT_SECRET = process.env.JWT_SECRET
 const app = express();
-const upload = multer();
+const upload = multer({ limits: { fileSize: 20 * 1024 * 1024 } }); 
 const ec = new EC('secp256k1');
 
 const uri = process.env.MONGO_URL
 const client = new MongoClient(uri);
 
-let usersCollection, imageCollection;
+let usersCollection;
 const challenges = new Map(); 
 
 
@@ -50,7 +49,6 @@ async function initDB() {
   await client.connect();
   const db = client.db("sonarDB");
   usersCollection = db.collection("login_info");
-  imageCollection = db.collection("images");
   console.log("Connected to MongoDB!");
 
 }
@@ -141,33 +139,115 @@ app.get('/verify-token', async (req, res) => {
 
 });
 
+app.get('/user/image/:name', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "No token provided" });
+
+    const { username } = jwt.verify(token, JWT_SECRET);
+
+    const user = await usersCollection.findOne(
+      { username },
+      { projection: { images: 1 } }
+    );
+
+    if (!user?.images) return res.status(404).send("No images");
+
+    const img = user.images.find(i => i.name === req.params.name);
+    if (!img) return res.status(404).send("Image not found");
+
+    res.setHeader("Content-Type", img.mimetype);
+    res.send(img.data.buffer);
+
+  } catch (err) {
+    res.status(500).send("Error downloading image");
+  }
+});
+
+
+app.get('/user/images', async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "No token provided" });
+
+    let username;
+    try {
+      username = jwt.verify(token, JWT_SECRET).username;
+    } catch {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
+    const user = await usersCollection.findOne(
+      { username },
+      { projection: { images: 1, _id: 0 } }
+    );
+
+    if (!user || !user.images)
+      return res.json({ images: [] });
+
+    const latest = user.images
+      .sort((a, b) => new Date(b.uploadedAt) - new Date(a.uploadedAt))
+      .slice(0, 15);
+
+    res.json({
+      images: latest.map(img => ({
+        name: img.name,
+        uploadedAt: img.uploadedAt,
+        mimetype: img.mimetype,
+        data: img.data ? img.data.toString("base64") : null
+      }))
+    });
+
+  } catch (err) {
+    console.error("Error fetching images:", err);
+    res.status(500).json({ error: "Unable to fetch images" });
+  }
+});
+
+
 app.post('/upload', upload.single('image'), async (req, res) => {
   try {
-    if (!req.file)
-        return res.status(400).json({ error: "No file uploaded" });
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "No token provided" });
 
-    const buffer = await sharp(req.file.buffer).resize(224, 224).toBuffer();
+    let username;
+    try {
+      username = jwt.verify(token, JWT_SECRET).username;
+    } catch {
+      return res.status(401).json({ error: "Invalid or expired token" });
+    }
+
+    if (!req.file)
+      return res.status(400).json({ error: "No file uploaded" });
+
+    const buffer = await sharp(req.file.buffer)
+      .resize(224, 224)
+      .toBuffer();
+
     const name = req.body.name?.split('.')[0] || `img_${Date.now()}`;
 
-    const existingImage = await imageCollection.findOne({ name });
-    if (existingImage) {
-      await imageCollection.updateOne(
-        { name },
-        { $set: { data: buffer, mimetype: req.file.mimetype, uploadedAt: new Date() } }
-      );
-    }
-    else {
-      await imageCollection.insertOne({
-        name,
-        data: buffer,
-        mimetype: req.file.mimetype,
-        uploadedAt: new Date()
-      });
-    }
+    await usersCollection.updateOne(
+      { username },
+      {
+        $setOnInsert: { username },
+        $push: {
+          images: {
+            name,
+            data: buffer,
+            mimetype: req.file.mimetype,
+            uploadedAt: new Date()
+          }
+        }
+      },
+      { upsert: true }
+    );
 
-    const { FormData, Blob } = globalThis; 
     const formData = new FormData();
-    formData.append("file", new Blob([buffer], { type: req.file.mimetype }), `${name}.jpg`);
+    formData.append(
+      "file",
+      new Blob([buffer], { type: req.file.mimetype }),
+      `${name}.jpg`
+    );
 
     const response = await fetch(COLAB_API, {
       method: "POST",
@@ -176,25 +256,67 @@ app.post('/upload', upload.single('image'), async (req, res) => {
 
     if (!response.ok) {
       const errText = await response.text();
-      throw new Error(`Colab API error: ${errText}`);
+      throw new Error("Colab API error: " + errText);
     }
 
     const prediction = await response.json();
 
     res.json({
-      message: `Image '${name}' processed successfully!`,
+      message: `Image '${name}' saved under user '${username}'`,
       model_prediction: prediction
     });
 
-  } catch (err){
-
+  } catch (err) {
+    console.error("Upload error:", err);
     res.status(500).json({ error: "Error uploading or predicting image" });
   }
-
 });
+
+
+app.delete("/user/image/:name", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "No token" });
+
+    const { username } = jwt.verify(token, JWT_SECRET);
+
+    const name = req.params.name;
+
+    await usersCollection.updateOne(
+      { username },
+      { $pull: { images: { name } } }
+    );
+
+    res.json({ deleted: true, name });
+  } catch (err) {
+    console.error("Delete error:", err);
+    res.status(500).json({ error: "Failed to delete image" });
+  }
+});
+
+app.delete("/user/images", async (req, res) => {
+  try {
+    const token = req.headers.authorization?.split(" ")[1];
+    if (!token) return res.status(401).json({ error: "No token" });
+
+    const { username } = jwt.verify(token, JWT_SECRET);
+
+    await usersCollection.updateOne(
+      { username },
+      { $set: { images: [] } }
+    );
+
+    res.json({ deleted: true });
+  } catch (err) {
+    console.error("Delete ALL error:", err);
+    res.status(500).json({ error: "Failed to delete all images" });
+  }
+});
+
 
 initDB().then(() => {
   const PORT = process.env.PORT || 3001;
+
   app.listen(PORT, () => {
     console.log(`Server running at http://localhost:${PORT}`);
 });

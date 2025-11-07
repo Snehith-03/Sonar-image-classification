@@ -76,11 +76,13 @@ function Login({ onLogin }) {
 
       const verifyData = await verifyResponse.json();
       if (verifyData.status === "Login successful" && verifyData.token) {
+        localStorage.setItem("username", username);
+      localStorage.setItem("jwt", verifyData.token);
+      setError("");
+      onLogin(username);
 
-        localStorage.setItem("jwt", verifyData.token);
-        setError("");
-        onLogin(username);
-      } else {
+      
+    }else {
         setError("Login failed. Invalid credentials.");
       }
     } catch (err) {

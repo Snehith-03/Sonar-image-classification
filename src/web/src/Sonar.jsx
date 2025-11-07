@@ -1,139 +1,131 @@
-import React, { useState, useRef } from "react";
+import React, { useState, useRef, useEffect } from "react";
+import JSZip from "jszip";
+
 import {
-  Upload, LogOut, Loader2, Radio,
-  Fish, Ship, Mountain, AlertCircle, User, Plane, Waves, History, Home
+  Upload, Home, Clock, LogOut, Loader2, X, Sparkles,
+  Fish, Ship, Mountain, AlertCircle, User, Plane, BookOpen
 } from "lucide-react";
+import Results from "./Results";
+import "./SonarDashboard.css";
 
-const Navbar = ({ onLogout }) => (
-  <nav
-    style={{
-      background: "rgba(15,23,42,0.95)",
-      borderBottom: "1px solid rgba(96,165,250,0.3)",
-      backdropFilter: "blur(10px)",
-      padding: "0.75rem 2rem",
-    }}
-  >
-    <div
-      style={{
-        maxWidth: "1400px",
-        margin: "0 auto",
-        display: "flex",
-        justifyContent: "space-between",
-        alignItems: "center",
-      }}
-    >
-      <div style={{ display: "flex", alignItems: "center", gap: "0.75rem" }}>
-        <Radio size={26} color="#60a5fa" />
-        <h1 style={{ color: "#fff", fontSize: "1.35rem", fontWeight: "700" }}>
-          SONAR AI
-        </h1>
-      </div>
+const formatDate = (d = new Date()) => new Date(d).toLocaleString();
 
-      <div style={{ display: "flex", gap: "1rem" }}>
-        <button
-          style={{
-            padding: "0.65rem 1.3rem",
-            background: "rgba(96,165,250,0.15)",
-            color: "#60a5fa",
-            border: "1px solid rgba(96,165,250,0.4)",
-            borderRadius: "0.6rem",
-            cursor: "pointer",
-            fontSize: "0.95rem",
-            fontWeight: "500",
-          }}
-        >
-          <Home size={18} style={{ marginRight: "0.5rem" }} />
-          Dashboard
-        </button>
+export default function Sonar() {
 
-        <button
-          style={{
-            padding: "0.65rem 1.3rem",
-            background: "rgba(96,165,250,0.15)",
-            color: "#60a5fa",
-            border: "1px solid rgba(96,165,250,0.4)",
-            borderRadius: "0.6rem",
-            cursor: "pointer",
-            fontSize: "0.95rem",
-            fontWeight: "500",
-          }}
-        >
-          <History size={18} style={{ marginRight: "0.5rem" }} />
-          History
-        </button>
+  const [username, setUsername] = useState(null);
 
-        <button
-          onClick={onLogout}
-          style={{
-            padding: "0.65rem 1.3rem",
-            background: "rgba(239,68,68,0.15)",
-            color: "#ef4444",
-            border: "1px solid rgba(239,68,68,0.4)",
-            borderRadius: "0.6rem",
-            cursor: "pointer",
-            fontSize: "0.95rem",
-            fontWeight: "500",
-          }}
-        >
-          <LogOut size={18} style={{ marginRight: "0.5rem" }} />
-          Logout
-        </button>
-      </div>
-    </div>
-  </nav>
-);
+  useEffect(() => {
+    const u = localStorage.getItem("username");
+    setUsername(u);
+  }, []);
 
-const UploadPage = ({ onImageProcessed }) => {
+  const isUserReady = username !== null;
+
+  const [currentPage, setCurrentPage] = useState("home");
   const [isDragging, setIsDragging] = useState(false);
   const [uploadedImage, setUploadedImage] = useState(null);
   const [isProcessing, setIsProcessing] = useState(false);
+  const [showResults, setShowResults] = useState(false);
+  const [classificationResult, setClassificationResult] = useState(null);
   const [uploadError, setUploadError] = useState("");
-  const fileInputRef = useRef(null);
+  const [history, setHistory] = useState([]);
+  const [bookmarks, setBookmarks] = useState([]);
+  const [showDeleteModal, setShowDeleteModal] = useState(false);
 
-  const uploadImageToBackend = async (file) => {
+  const fileInputRef = useRef(null);
+  const API_BASE = "http://localhost:3001";
+
+  const fetchHistory = async () => {
+    const token = localStorage.getItem("jwt");
+    if (!token) return;
+
     try {
-      const formData = new FormData();
-      formData.append("image", file);
-      formData.append("name", file.name);
-      const r = await fetch("http://localhost:3001/upload", { method: "POST", body: formData });
-      if (!r.ok) throw new Error("Upload failed");
-      return await r.json();
+      const res = await fetch(`${API_BASE}/user/images`, {
+        headers: { Authorization: "Bearer " + token },
+      });
+
+      const data = await res.json();
+      setHistory(data.images || []);
     } catch (err) {
-      setUploadError(`Error: ${err.message}`);
-      return null;
+      console.error("History fetch error:", err);
     }
   };
 
-  const processImage = async (file, url) => {
+  useEffect(() => {
+    if (isUserReady) fetchHistory();
+  }, [isUserReady]);
+
+  useEffect(() => {
+    if (!isUserReady) return;
+    const saved = localStorage.getItem(`sonar_bookmarks_${username}`);
+    setBookmarks(saved ? JSON.parse(saved) : []);
+  }, [isUserReady, username]);
+
+  useEffect(() => {
+    if (!isUserReady) return;
+    localStorage.setItem(`sonar_bookmarks_${username}`, JSON.stringify(bookmarks));
+  }, [bookmarks, username, isUserReady]);
+
+  const processImage = async (file, imgDataUrl) => {
     setIsProcessing(true);
     setUploadError("");
-    const result = await uploadImageToBackend(file);
-    if (!result) return setIsProcessing(false);
+    setShowResults(false);
 
-    const prediction = result.model_prediction;
-    const probs = prediction.probabilities || {};
-    const classes = Object.entries(probs).map(([cls, conf]) => ({
-      category: cls.charAt(0).toUpperCase() + cls.slice(1),
-      confidence: Math.round(conf * 100),
-      icon:
-        {
-          ship: <Ship size={18} />,
-          mine: <AlertCircle size={18} />,
-          fish: <Fish size={18} />,
-          seafloor: <Mountain size={18} />,
-          plane: <Plane size={18} />,
-          human: <User size={18} />,
-        }[cls] || <Waves size={18} />,
-    }));
-    const topClass = prediction.predicted_class || classes.sort((a, b) => b.confidence - a.confidence)[0]?.category;
-    onImageProcessed({
-      original: url,
-      filename: file.name,
-      aiDescription: `AI detected a ${topClass} with ${
-        prediction.confidence_percent?.toFixed(2) || classes[0]?.confidence
-      }% confidence.`,
-      classifications: classes.sort((a, b) => b.confidence - a.confidence),
-    });
+    try {
+      const token = localStorage.getItem("jwt");
+      if (!token) throw new Error("No auth token found");
+
+      const formData = new FormData();
+      formData.append("image", file);
+      formData.append("name", file.name);
+
+      const response = await fetch(`${API_BASE}/upload`, {
+        method: "POST",
+        headers: { Authorization: `Bearer ${token}` },
+        body: formData,
+      });
+
+      if (!response.ok) throw new Error("Upload failed");
+
+      const raw = await response.json();
+      const data = raw.model_prediction;
+
+      const mappedClasses = Object.entries(data.probabilities).map(
+        ([category, confidence]) => ({
+          category,
+          confidence,
+          icon:
+            category === "ship" ? <Ship size={14} /> :
+            category === "fish" ? <Fish size={14} /> :
+            category === "mine" ? <AlertCircle size={14} /> :
+            category === "plane" ? <Plane size={14} /> :
+            category === "human" ? <User size={14} /> :
+            category === "seafloor" ? <Mountain size={14} /> :
+            null,
+        })
+      );
+
+      const finalResult = {
+        original: imgDataUrl,
+        processed: imgDataUrl,
+        heatmap: imgDataUrl,
+        filename: file.name,
+        aiDescription: `${data.predicted_class.toUpperCase()} detected with ${data.confidence_percent.toFixed(
+          2
+        )}% confidence`,
+        classifications: mappedClasses.sort((a, b) => b.confidence - a.confidence),
+        metadata: { timestamp: formatDate(), uploadedBy: username },
+      };
+
+      setClassificationResult(finalResult);
+      setShowResults(true);
+
+      await fetchHistory();
+    } catch (err) {
+      console.error(err);
+      setUploadError("Prediction failed — check backend.");
+    }
+
     setIsProcessing(false);
   };
 
@@ -141,230 +133,348 @@ const UploadPage = ({ onImageProcessed }) => {
     if (file && file.type.startsWith("image/")) {
       const reader = new FileReader();
       reader.onload = (e) => {
-        setUploadedImage(e.target.result);
-        processImage(file, e.target.result);
+        const imgDataUrl = e.target.result;
+        setUploadedImage(imgDataUrl);
+        processImage(file, imgDataUrl);
       };
       reader.readAsDataURL(file);
     }
   };
 
-  return (
-    <div
-      onClick={() => fileInputRef.current?.click()}
-      onDrop={(e) => {
-        e.preventDefault();
-        setIsDragging(false);
-        const f = e.dataTransfer.files[0];
-        if (f) handleFileSelect(f);
-      }}
-      onDragOver={(e) => {
-        e.preventDefault();
-        setIsDragging(true);
-      }}
-      onDragLeave={() => setIsDragging(false)}
-      style={{
-        border: `2px dashed ${isDragging ? "#60a5fa" : "rgba(96,165,250,0.3)"}`,
-        borderRadius: "1rem",
-        background: "rgba(15,23,42,0.8)",
-        padding: "4rem 2rem",
-        textAlign: "center",
-        cursor: "pointer",
-        minHeight: "500px",
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "center",
-        transition: "0.3s",
-      }}
-    >
-      <input
-        ref={fileInputRef}
-        type="file"
-        accept="image/*"
-        onChange={(e) => handleFileSelect(e.target.files[0])}
-        style={{ display: "none" }}
-      />
-      {!uploadedImage ? (
-        <div>
-          <Upload size={72} color="#60a5fa" style={{ marginBottom: "1.5rem" }} />
-          <h3 style={{ color: "#fff", fontSize: "1.75rem", fontWeight: "600" }}>Upload SONAR Image</h3>
-          <p style={{ color: "#94a3b8" }}>Click or drag and drop to analyze</p>
-          {uploadError && <p style={{ color: "#ef4444" }}>{uploadError}</p>}
+  const handleDrop = (e) => {
+    e.preventDefault();
+    setIsDragging(false);
+    const f = e.dataTransfer.files[0];
+    if (f) handleFileSelect(f);
+  };
+
+  const clearUpload = () => {
+    setUploadedImage(null);
+    setShowResults(false);
+    setClassificationResult(null);
+    setUploadError("");
+  };
+
+  const deleteHistoryImage = async (name) => {
+    const token = localStorage.getItem("jwt");
+    if (!token) return;
+
+    await fetch(`${API_BASE}/user/image/${name}`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + token },
+    });
+
+    await fetchHistory();
+  };
+
+  const deleteAllHistory = async (downloadZip) => {
+    const token = localStorage.getItem("jwt");
+    if (!token) return;
+
+    if (downloadZip && history.length > 0) {
+      const zip = new JSZip();
+      history.forEach((img) => {
+        zip.file(`${img.name}.jpg`, img.data, { binary: true });
+      });
+
+      const blob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `sonar_backup_${username}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+    }
+
+    await fetch(`${API_BASE}/user/images`, {
+      method: "DELETE",
+      headers: { Authorization: "Bearer " + token },
+    });
+
+    await fetchHistory();
+    setShowDeleteModal(false);
+  };
+
+  const downloadHistoryImage = async (name) => {
+    const token = localStorage.getItem("jwt");
+    const res = await fetch(`${API_BASE}/user/image/${name}`, {
+      headers: { Authorization: "Bearer " + token },
+    });
+
+    const blob = await res.blob();
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `${name}.jpg`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const toggleBookmark = () => {
+    if (!classificationResult) return;
+    setBookmarks((prev) => {
+      const exists = prev.find((b) => b.filename === classificationResult.filename);
+      if (exists) return prev.filter((b) => b.filename !== classificationResult.filename);
+      return [{ ...classificationResult, bookmarkedAt: new Date().toISOString() }, ...prev];
+    });
+  };
+
+  const isCurrentBookmarked = () =>
+    bookmarks.some((b) => b.filename === classificationResult?.filename);
+
+  const handleLogout = () => {
+    localStorage.removeItem("jwt");
+    localStorage.removeItem("username");
+    localStorage.removeItem(`privKey_${username}`);
+    window.location.reload();
+  };
+
+  if (!isUserReady) {
+    return <div></div>;
+  }
+
+  const Navbar = ({ currentPage, onNavigate }) => (
+    <nav className="navbar">
+      <div className="nav-container">
+        <div className="nav-left">
+          <div className="logo-wrapper">
+            <div className="logo-box"><Sparkles size={20} /></div>
+          </div>
+          <div className="logo-text">
+            <div className="brand">SONAR AI</div>
+            <div className="brand-sub">{username}</div>
+          </div>
         </div>
+
+        <div className="nav-right">
+          <button className={`nav-button ${currentPage === "home" ? "active" : ""}`} onClick={() => onNavigate("home")}>
+            <Home size={14} /> <span>Dashboard</span>
+          </button>
+
+          <button className={`nav-button ${currentPage === "history" ? "active" : ""}`} onClick={() => {
+            fetchHistory();
+            onNavigate("history");
+          }}>
+            <Clock size={14} /> <span>History</span>
+          </button>
+
+          <button className={`nav-button ${currentPage === "bookmarks" ? "active" : ""}`} onClick={() => onNavigate("bookmarks")}>
+            <BookOpen size={14} /> <span>Bookmarks</span>
+          </button>
+
+          <button className="nav-button logout" onClick={handleLogout}>
+            <LogOut size={14} /> <span>Logout</span>
+          </button>
+        </div>
+      </div>
+    </nav>
+  );
+
+  const HistoryPage = () => (
+    <div className="history-page">
+      <div className="history-header">
+        <h3>Classification History</h3>
+
+        {history.length > 0 && (
+          <button className="btn muted" style={{ backgroundColor: "#ff4d4d", color: "white" }}
+            onClick={() => setShowDeleteModal(true)}>
+            Delete All
+          </button>
+        )}
+      </div>
+
+      {!history.length ? (
+        <div className="empty">No history yet — analyze something.</div>
       ) : (
-        <div style={{ position: "relative", width: "100%", maxWidth: "700px" }}>
-          <img
-            src={uploadedImage}
-            alt="preview"
-            style={{ width: "100%", borderRadius: "0.75rem", border: "1px solid rgba(96,165,250,0.3)" }}
-          />
-          {isProcessing && (
-            <div
-              style={{
-                position: "absolute",
-                inset: 0,
-                background: "rgba(15,23,42,0.9)",
-                display: "flex",
-                flexDirection: "column",
-                alignItems: "center",
-                justifyContent: "center",
-                borderRadius: "0.5rem",
-                gap: "1rem",
-              }}
-            >
-              <Loader2 size={48} color="#60a5fa" style={{ animation: "spin 1s linear infinite" }} />
-              <span style={{ color: "#e2e8f0" }}>Analyzing image...</span>
+        <div className="history-list">
+          {history.map((h, idx) => (
+            <div key={idx} className="history-item">
+              <div className="history-main">
+                <div className="history-filename">{h.name}</div>
+                <div className="history-time">{formatDate(h.uploadedAt)}</div>
+              </div>
+
+              <div className="history-ops">
+                <button className="btn cyan" onClick={() => downloadHistoryImage(h.name)}>
+                  Download
+                </button>
+
+                <button className="btn muted" style={{ backgroundColor: "#ff4d4d", color: "white" }}
+                  onClick={() => deleteHistoryImage(h.name)}>
+                  Delete
+                </button>
+              </div>
             </div>
-          )}
+          ))}
+        </div>
+      )}
+
+      {showDeleteModal && (
+        <div className="modal-backdrop" onClick={() => setShowDeleteModal(false)}>
+          <div className="modal" onClick={(e) => e.stopPropagation()}>
+            <h3>Delete all images?</h3>
+            <p>Download ZIP backup before deleting everything?</p>
+
+            <div className="modal-actions">
+              <button className="btn green" onClick={() => deleteAllHistory(true)}>
+                Download ZIP & Delete
+              </button>
+
+              <button className="btn muted" onClick={() => deleteAllHistory(false)}>
+                Delete Without Saving
+              </button>
+
+              <button className="btn muted" onClick={() => setShowDeleteModal(false)}>
+                Cancel
+              </button>
+            </div>
+          </div>
         </div>
       )}
     </div>
   );
-};
 
-const ResultsPage = ({ classificationResult, onNewAnalysis }) => {
-  const downloadResults = () => {
-    const blob = new Blob([JSON.stringify(classificationResult, null, 2)], { type: "application/json" });
-    const url = URL.createObjectURL(blob);
-    const a = document.createElement("a");
-    a.href = url;
-    a.download = `${classificationResult.filename.replace(/\.[^/.]+$/, "")}_report.json`;
-    a.click();
-    URL.revokeObjectURL(url);
-  };
-  const handleExplain = () => alert("LIME / Grad-CAM visualization coming soon!");
+  const BookmarksPage = () => (
+    <div className="bookmarks-page">
+      <div className="bookmarks-header">
+        <h3>Bookmarks</h3>
+        <button className="btn muted" onClick={() => setBookmarks([])}>Clear All</button>
+      </div>
 
-  return (
-    <div
-      style={{
-        display: "flex",
-        gap: "2rem",
-        background: "rgba(15,23,42,0.85)",
-        borderRadius: "1rem",
-        border: "1px solid rgba(96,165,250,0.2)",
-        padding: "2rem",
-        flexWrap: "wrap",
-        justifyContent: "center",
-      }}
-    >
-      {/* Left side: image and buttons */}
-      <div style={{ flex: "1 1 60%", textAlign: "center" }}>
-        <img
-          src={classificationResult.original}
-          alt="Analyzed"
-          style={{
-            width: "100%",
-            maxWidth: "850px",
-            borderRadius: "1rem",
-            border: "1px solid rgba(96,165,250,0.3)",
-            boxShadow: "0 0 40px rgba(59,130,246,0.3)",
-          }}
-        />
-        <p style={{ color: "#e2e8f0", fontSize: "1.25rem", marginTop: "1.5rem" }}>
-          {classificationResult.aiDescription}
-        </p>
+      {!bookmarks.length ? (
+        <div className="empty">No bookmarks yet.</div>
+      ) : (
+        <div className="bookmarks-list">
+          {bookmarks.map((b, idx) => (
+            <div key={idx} className="bookmark-item">
+              <div className="bookmark-main">
+                <div className="bookmark-filename">{b.filename}</div>
+                <div className="bookmark-time">{formatDate(b.bookmarkedAt)}</div>
+              </div>
 
-        <div style={{ display: "flex", justifyContent: "center", gap: "1rem", marginTop: "2rem", flexWrap: "wrap" }}>
-          <button
-            onClick={downloadResults}
-            style={{
-              padding: "0.9rem 1.4rem",
-              borderRadius: "0.6rem",
-              border: "1px solid rgba(34,197,94,0.3)",
-              background: "rgba(34,197,94,0.15)",
-              color: "#22c55e",
-              cursor: "pointer",
-              fontSize: "1rem",
-            }}
-          >
-            Download JSON Report
-          </button>
-          <button
-            onClick={handleExplain}
-            style={{
-              padding: "0.9rem 1.4rem",
-              borderRadius: "0.6rem",
-              border: "1px solid rgba(147,51,234,0.3)",
-              background: "rgba(147,51,234,0.2)",
-              color: "#c084fc",
-              cursor: "pointer",
-              fontSize: "1rem",
-            }}
-          >
-            LIME / Grad-CAM Analysis
-          </button>
-          <button
-            onClick={onNewAnalysis}
-            style={{
-              padding: "0.9rem 1.4rem",
-              borderRadius: "0.6rem",
-              border: "1px solid rgba(148,163,184,0.3)",
-              background: "rgba(148,163,184,0.15)",
-              color: "#94a3b8",
-              cursor: "pointer",
-              fontSize: "1rem",
-            }}
-          >
-            New Analysis
-          </button>
+              <div className="bookmark-ops">
+                <button className="btn cyan" onClick={() => {
+                  setClassificationResult(b);
+                  setShowResults(true);
+                  setCurrentPage("home");
+                }}>
+                  Open
+                </button>
+
+                <button className="btn muted"
+                  onClick={() =>
+                    setBookmarks((prev) => prev.filter((x) => x.filename !== b.filename))
+                  }>
+                  Remove
+                </button>
+              </div>
+            </div>
+          ))}
         </div>
-      </div>
-
-      <div style={{ flex: "1 1 30%", display: "flex", flexDirection: "column", gap: "1rem", alignItems: "stretch" }}>
-        {classificationResult.classifications.map((c, i) => (
-          <div
-            key={i}
-            style={{
-              background: "linear-gradient(135deg, rgba(59,130,246,0.15), rgba(37,99,235,0.3))",
-              border: "1px solid rgba(59,130,246,0.4)",
-              borderRadius: "0.8rem",
-              padding: "1.1rem 1.5rem",
-              display: "flex",
-              alignItems: "center",
-              justifyContent: "space-between",
-              color: "#e2e8f0",
-              boxShadow: "0 0 20px rgba(59,130,246,0.4)",
-            }}
-          >
-            <span style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "1rem" }}>
-              {c.icon} {c.category}
-            </span>
-            <strong style={{ fontSize: "1.2rem", color: "#60a5fa" }}>{c.confidence}%</strong>
-          </div>
-        ))}
-      </div>
+      )}
     </div>
   );
-};
-
-const SonarApp = () => {
-  const [page, setPage] = useState("upload");
-  const [result, setResult] = useState(null);
-
-  const handleLogout = () => window.location.reload();
-  const handleProcessed = (r) => {
-    setResult(r);
-    setPage("results");
-  };
 
   return (
-    <div
-      style={{
-        minHeight: "100vh",
-        background: "linear-gradient(135deg,#0f172a 0%,#1e293b 100%)",
-        fontFamily: "Inter,sans-serif",
-      }}
-    >
-      <Navbar onLogout={handleLogout} />
-      <main style={{ padding: "2.5rem", maxWidth: "1400px", margin: "0 auto" }}>
-        {page === "upload" && <UploadPage onImageProcessed={handleProcessed} />}
-        {page === "results" && <ResultsPage classificationResult={result} onNewAnalysis={() => setPage("upload")} />}
-      </main>
+    <div className="sonar-dashboard">
+      <Navbar
+        username={username}
+        onNavigate={(p) => {
+          if (p === "history") fetchHistory();
+          setCurrentPage(p);
+          setShowResults(false);
+        }}
+        currentPage={currentPage}
+      />
 
-      <style>{`
-        @keyframes spin { from {transform: rotate(0deg);} to {transform: rotate(360deg);} }
-      `}</style>
+      <main className="main-content">
+        {showResults && classificationResult ? (
+          <Results
+            classificationResult={classificationResult}
+            onReset={() => {
+              setShowResults(false);
+              clearUpload();
+            }}
+            onBack={() => {
+              setShowResults(false);
+              setCurrentPage("home");
+            }}
+            onToggleBookmark={toggleBookmark}
+            isBookmarked={isCurrentBookmarked()}
+          />
+        ) : (
+          <>
+            {currentPage === "home" && (
+              <div className="home-page">
+                <header className="page-header" style={{ marginLeft: "-30px" }}>
+                  <div className="header-left">
+                    <Sparkles size={20} />
+                    <div>
+                      <h2>Analyze SONAR Images</h2>
+                      <p className="subtitle">
+                        Upload underwater SONAR imagery for AI classification. Welcome, {username}.
+                      </p>
+                    </div>
+                  </div>
+                </header>
+
+                <section
+                  className={`upload-zone ${isDragging ? "is-dragging" : ""} ${uploadedImage ? "has-image" : ""}`}
+                  onDrop={handleDrop}
+                  onDragOver={(e) => {
+                    e.preventDefault();
+                    setIsDragging(true);
+                  }}
+                  onDragLeave={() => setIsDragging(false)}
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  <input
+                    ref={fileInputRef}
+                    type="file"
+                    accept="image/*"
+                    onChange={(e) => handleFileSelect(e.target.files[0])}
+                    className="file-input"
+                  />
+
+                  {!uploadedImage ? (
+                    <div className="upload-prompt">
+                      <Upload size={64} />
+                      <h3>Upload SONAR Image</h3>
+                      <p>Click or drag and drop to analyze</p>
+                      {uploadError && <p className="text--error">{uploadError}</p>}
+                    </div>
+                  ) : (
+                    <div className="preview-area">
+                      <div className="preview-image-wrap">
+                        <img className="preview-image" src={uploadedImage} alt="preview" />
+                        <button
+                          className="clear-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            clearUpload();
+                          }}
+                        >
+                          <X size={16} />
+                        </button>
+
+                        {isProcessing && (
+                          <div className="processing-overlay">
+                            <Loader2 className="spin" />
+                            <span>Analyzing...</span>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </section>
+              </div>
+            )}
+
+            {currentPage === "history" && <HistoryPage />}
+            {currentPage === "bookmarks" && <BookmarksPage />}
+          </>
+        )}
+      </main>
     </div>
   );
-};
-
-export default SonarApp;
+}
