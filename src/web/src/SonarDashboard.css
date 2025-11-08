@@ -1,6 +1,5 @@
 /* ============================================
-   SONAR AI - Ultra Premium Dark Theme
-   Sophisticated, Bold, Professional
+                     SONAR AI 
    ============================================ */
 
 /* ================== DESIGN TOKENS ================== */
@@ -717,7 +716,7 @@ body {
   font-weight: 500;
 }
 
-/* ================== RESULTS CARD - PREMIUM LAYOUT ================== */
+/* ================== RESULTS CARD  ================== */
 .results-wrapper {
   display: grid;
   grid-template-columns: 1.6fr 1fr;
@@ -1555,7 +1554,6 @@ button:focus-visible {
   }
 }
 
-/* ================== PREMIUM TOUCHES ================== */
 
 /* Subtle scan line effect on upload zone */
 .upload-zone::after {
@@ -2019,3 +2017,4 @@ input:focus-visible,
   .results-container { max-width: 100%; margin: 0; padding: 0; }
 
 }
+
