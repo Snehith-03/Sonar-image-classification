@@ -238,7 +238,7 @@ export default function Sonar() {
       <div className="nav-container">
         <div className="nav-left">
           <div className="logo-wrapper">
-            <div className="logo-box"><Sparkles size={20} /></div>
+            <div className="logo-box"><Satellite size={20} /></div>
           </div>
           <div className="logo-text">
             <div className="brand">SONAR AI</div>
@@ -408,9 +408,9 @@ export default function Sonar() {
               <div className="home-page">
                 <header className="page-header" style={{ marginLeft: "-30px" }}>
                   <div className="header-left">
-                    <Sparkles size={20} />
+                    <Search size={20} />
                     <div>
-                      <h2>Analyze SONAR Images</h2>
+                      <h3>Analyze SONAR Images</h3>
                       <p className="subtitle">
                         Upload underwater SONAR imagery for AI classification. Welcome, {username}.
                       </p>
@@ -478,3 +478,4 @@ export default function Sonar() {
     </div>
   );
 }
+
