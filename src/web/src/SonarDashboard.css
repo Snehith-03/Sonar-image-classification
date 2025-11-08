@@ -465,7 +465,7 @@ body {
 /* ================== UPLOAD ZONE - DRAMATIC & MINIMAL ================== */
 .upload-zone {
   position: relative;
-  min-height: 560px;
+  min-height: 400px;
   display: grid;
   place-items: center;
   background: var(--slate-dark);
@@ -2017,4 +2017,5 @@ input:focus-visible,
 @media print {
   .header-actions, .nav-button, .ambient-overlay, .navbar { display: none !important; }
   .results-container { max-width: 100%; margin: 0; padding: 0; }
+
 }
